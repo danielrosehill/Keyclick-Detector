@@ -76,8 +76,9 @@ def n_frames(n_samples):
     return max(0, (n_samples - N_FFT) // HOP + 1)
 
 
-def segments(prob, thr=0.5, merge_s=0.015):
-    """Per-frame probabilities -> [[onset_s, offset_s], ...] runs above thr, gaps < merge_s joined."""
+def segments(prob, thr=0.5, merge_s=0.15):
+    """Per-frame probabilities -> [[onset_s, offset_s], ...] runs above thr, gaps < merge_s joined (one key
+    press = one event; same gap as keyclick.features.EVENT_GAP_S)."""
     on = np.asarray(prob) > thr
     out = []
     for k in np.flatnonzero(on):

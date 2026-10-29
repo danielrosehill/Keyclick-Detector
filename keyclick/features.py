@@ -40,3 +40,19 @@ def speech_span(x, sr, min_run_s=0.04):
         else:
             i += 1
     return [round(runs[0][0] * FRAME_S, 3), round(runs[-1][1] * FRAME_S, 3)] if runs else None
+
+
+EVENT_GAP_S = 0.15
+
+
+def merge_events(clicks, gap=EVENT_GAP_S):
+    """Join clicks less than `gap` s apart into one event. A key press is heard as one click but shows up as
+    2-4 transients over ~50-150 ms (finger on the cap, bottoming out, release); labels, training targets,
+    predictions and the review page all work on these merged events (Daniel, 2026-10-29)."""
+    out = []
+    for a, b in sorted(clicks):
+        if out and a - out[-1][1] < gap:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out

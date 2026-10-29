@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from keyclick.features import merge_events  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 AUTO, REVIEWED, DATA = ROOT / "labels/auto.jsonl", ROOT / "labels/reviewed.jsonl", ROOT / "data/wake-words/data"
 
@@ -29,6 +32,8 @@ def takes():
                 r = json.loads(l)
                 done[r["id"]] = r
     rows = [done.get(t["id"], t) for t in auto]
+    for r in rows:
+        r["clicks"] = merge_events(r["clicks"])
     preds = sorted((ROOT / "labels").glob("pred-*.jsonl"), key=lambda f: f.stat().st_mtime)
     if preds:
         p = {json.loads(l)["id"]: json.loads(l) for l in preds[-1].read_text().splitlines() if l.strip()}

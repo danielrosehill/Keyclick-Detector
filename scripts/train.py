@@ -15,7 +15,7 @@ import torch
 from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from keyclick.features import load  # noqa: E402
+from keyclick.features import load, merge_events  # noqa: E402
 from keyclick.model import SR, ClickNet, frame_labels, n_frames, predict  # noqa: E402
 
 DATA = Path("data/wake-words/data")
@@ -33,7 +33,7 @@ def labelled():
     for r in rows.values():
         x, sr = load(DATA / r["file"])
         assert sr == SR, r["file"]
-        out.append(dict(r, x=x))
+        out.append(dict(r, x=x, clicks=merge_events(r["clicks"])))
     return out
 
 

@@ -8,7 +8,8 @@ A click is a 5 ms frame whose >2 kHz energy is >= RISE_DB over the median of the
 over the frame before; frames within MERGE_S are one click, which ends when the energy falls back to within
 3 dB of that median (at most MAX_LEN_S). Candidates inside the speech span (keyclick.features.speech_span, +-SPEECH_PAD_S; the dataset's
 speech_start_s is unusable here, it fires on the clicks themselves) are dropped: the
-detector is only for the silence before and after speech. Flags: `event_unmatched` (no click within 250 ms of the
+detector is only for the silence before and after speech. Transients < EVENT_GAP_S apart are then merged into
+one click event (keyclick.features.merge_events). Flags: `event_unmatched` (no click within 250 ms of the
 logged start event; the stop event is not checked, as the capture ends as the key goes down so the stop click is
 mostly not in the file) and `no_events` (takes whose events were never logged).
 """
@@ -18,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from keyclick.features import FRAME_S, hp_energy_db, load, speech_span  # noqa: E402
+from keyclick.features import FRAME_S, hp_energy_db, load, merge_events, speech_span  # noqa: E402
 
 RISE_DB, JUMP_DB, MERGE_S, MAX_LEN_S, SPEECH_PAD_S = 5.0, 4.0, 0.03, 0.08, 0.05
 DATA = Path("data/wake-words/data")
@@ -51,7 +52,7 @@ def main():
                 continue
             x, sr = load(DATA / split / r["original_file_name"])
             speech = speech_span(x, sr)
-            clicks = detect(hp_energy_db(x, sr), speech)
+            clicks = merge_events(detect(hp_energy_db(x, sr), speech))
             events = r.get("key_events_s") or []
             flags = ["no_events"] if not events else []
             if events and all(abs(c[0] - events[0]) > 0.25 for c in clicks):

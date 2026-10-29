@@ -10,7 +10,7 @@ import json, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from keyclick.features import load  # noqa: E402
+from keyclick.features import load, merge_events  # noqa: E402
 from keyclick.model import load_model, predict  # noqa: E402
 
 TOL = 0.01
@@ -32,6 +32,7 @@ def main():
     for r in rows.values():
         x, _ = load(Path("data/wake-words/data") / r["file"])
         pred, _ = predict(model, x)
+        r["clicks"] = merge_events(r["clicks"])
         dis = any(not any(overlaps(p, c) for c in r["clicks"]) for p in pred) or \
             any(not any(overlaps(c, p) for p in pred) for c in r["clicks"])
         out.append(dict(id=r["id"], pred=pred, disagree=dis))

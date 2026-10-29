@@ -8,9 +8,17 @@ release ~55 ms later) in the take. A fixed trim either cuts too little (slow pre
 much. A detector that returns click timestamps lets a trim cut exactly after the last leading click and
 before the first trailing one.
 
-Status (2026-10-29): v1 trained on auto-labels; reviewing model/label disagreements before v2.
+Status (2026-10-29): v2 trained on auto-labels; reviewing model/label disagreements before v3.
 
-v1 (`runs/v1/metrics.json`), test split (43 takes, 110 labelled clicks), against auto-labels: recall 0.96,
+A click is an **event**: transients less than 0.15 s apart are merged (`keyclick.features.merge_events`), since
+one key press shows up as 2-4 transients over ~50-150 ms (finger on the cap, bottoming out, release) but is
+heard, and trimmed, as one click. v1 counted transients; from v2 everything counts events.
+
+v2 (`runs/v2/metrics.json`), test split (43 takes, 71 click events), outside speech, against auto-labels: recall
+1.00, precision 0.68 (33 extra detections), median onset error 2.5 ms.
+
+
+v1 (`runs/v1/metrics.json`, transients not events), test split (43 takes, 110 labelled clicks), against auto-labels: recall 0.96,
 precision 0.66, median onset error 2.5 ms. Precision is understated: listening to the extra detections shows
 several are real clicks the auto-labeller missed (it drops a second onset within 30 ms of the previous click,
 and faint presses sit at its 5 dB threshold). Others are likely false: a detection at the very start of a
