@@ -2,16 +2,21 @@
 """Local page to check and correct click labels: `uv run scripts/review.py`, then open http://127.0.0.1:8765.
 
 Reads labels/auto.jsonl, writes every checked take to labels/reviewed.jsonl (same fields, plus reviewed_at;
-the last line per id wins), so it can be stopped and resumed. Audio is served from data/wake-words/data.
-Page: click the waveform to move the playhead; drag across it to mark a click (once per click); M marks a
-20 ms click at the playhead; drag a mark's edge to adjust it; click a mark then Delete/Backspace to remove it.
-Clicking a mark, finishing a drag, P, and the list's play buttons play only the mark's bounds (3 ms fades so
-the cut edges don't click); L loops it.
-Space play / stop from the playhead, R from start, 1 / 2 / 3 speed 100 / 50 / 25 %, Enter accept and next,
-Left / Right previous / next take. Marks are numbered on the waveform and listed below it.
+append-only, the last line per id wins), so it can be stopped and resumed. Audio is served from data/wake-words/data.
+
+Page (rebuilt 2026-10-29 so each gesture does one thing):
+- Green boxes are your clicks (what gets saved); dashed cyan boxes are model detections that overlap none of them.
+  Thin cyan bars along the top: every model detection.
+- Add: drag across the waveform, M at the white line, or the + on a model box (A when it is selected).
+  Remove: the x on a green box, right-click it, or Delete / Backspace / X when selected. Drawing over a click replaces it.
+  Adjust: drag a green edge. Z undoes; "reset to saved" returns to the last save.
+- Clicking any box or list row selects it and plays only its bounds (3 ms fades so the cut edges don't click);
+  Tab / Shift+Tab step through boxes, P replays, L loops. Clicking empty waveform moves the white line.
+- Enter saves and moves on; leaving a take with edits (arrows, prev/next, queue change) also saves it.
+- Queue: to do (disagreements not yet reviewed), all disagreements, already reviewed, all takes; test split first.
+  Disagreements come from the newest labels/pred-<run>.jsonl (scripts/predict_all.py).
 Listening aids: playback normalised to the take's peak, +12 / +24 dB boosts behind a limiter, F plays only >1.5 kHz,
-and a red trace of >1.5 kHz energy. If labels/pred-<run>.jsonl exists (scripts/predict_all.py), the newest is shown
-as cyan bars (U adopts them) and the page lists only disagreeing takes, test split first (toggle on the page).
+and an orange trace of >1.5 kHz energy. Space play / stop, R from start, 1 / 2 / 3 speed 100 / 50 / 25 %.
 """
 import json, sys
 from datetime import datetime, timezone
@@ -46,47 +51,53 @@ def takes():
 
 
 PAGE = r"""<!doctype html><meta charset=utf-8><title>Keyclick review</title>
-<style>body{font:14px system-ui;margin:16px;background:#111;color:#ddd}canvas{width:100%;height:260px;background:#000;cursor:text}
-.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0}.ok{color:#7c7}.flag{color:#fb5}button{font:inherit}
-#marks li{margin:2px 0}#marks li.sel{color:#f77;font-weight:bold}kbd{background:#333;border-radius:3px;padding:0 4px}</style>
+<style>body{font:14px system-ui;margin:16px;background:#111;color:#ddd}canvas{width:100%;height:260px;background:#000;display:block}
+.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0}.ok{color:#7c7}.flag{color:#fb5}.dirty{color:#f90;font-weight:bold}
+button,select{font:inherit}.grp{display:flex;gap:2px;align-items:center}kbd{background:#333;border-radius:3px;padding:0 4px}
+table{border-collapse:collapse}td{padding:3px 8px;white-space:nowrap}tr.c{cursor:pointer}tr.c:hover{background:#222}tr.sel{background:#332b00}
+.b{border-radius:3px;padding:1px 6px;font-size:12px}.mine{background:#1d5a2e}.miss{background:#5a4a1d}.model{background:#14505a}
+.legend{color:#999;line-height:1.7}.sw{display:inline-block;width:12px;height:12px;vertical-align:middle;margin-right:4px}</style>
 <div class=bar><b id=pos></b><span id=meta></span><span id=state></span></div>
 <canvas id=c width=1800 height=260></canvas>
-<div class=bar><button onclick=go(-1)>&larr; prev</button><button onclick=toggle()>&#9654; play / stop</button>
-<button onclick=play(0)>&#8635; from start</button>
-<span>speed <button data-r=1 style=font-weight:bold onclick=speed(1)>100%</button><button data-r=.5 onclick=speed(.5)>50%</button><button data-r=.25 onclick=speed(.25)>25%</button></span>
-<span>volume <button data-g=0 style=font-weight:bold onclick=vol(0)>normalised</button><button data-g=12 onclick=vol(12)>+12 dB</button><button data-g=24 onclick=vol(24)>+24 dB</button></span>
-<label><input type=checkbox id=hp onchange=route()> click filter (only &gt;1.5 kHz, F)</label>
-<label><input type=checkbox id=dis checked onchange=refilter()> only takes where model and labels disagree</label></div><div class=bar>
-<button onclick=playSel()>&#9654; play selected mark only (P)</button><label><input type=checkbox id=loop> loop it (L)</label>
-<button onclick=markHere()>+ mark click at line (M)</button><button onclick=useModel()>use model marks (U)</button><button onclick=clearAll()>clear all marks</button>
-<button onclick=accept()><b>accept &amp; next (Enter)</b></button><button onclick=nextTodo()>next unreviewed</button></div>
-<div style="display:flex;gap:40px"><div><b id=count></b><ol id=marks></ol></div>
-<div style="color:#999;line-height:1.7">
-<b>Click</b> the waveform: move the white line there (and keep playing if playing).<br>
-<b>Drag</b> across the waveform: mark that stretch as a click. Do it once per click.<br>
-<kbd>M</kbd>: mark a 20 ms click at the white line. <b>Drag a red edge</b> to adjust a mark.<br>
-<b>Click a red mark</b> to select it and hear just that mark; <kbd>P</kbd> plays it again, <kbd>L</kbd> loops it; <kbd>Delete</kbd> / <kbd>Backspace</kbd> removes it.<br>
-A new or adjusted mark plays by itself when you let go, so you can hear exactly what is inside it.<br>
-<kbd>Space</kbd> play / stop from the line &middot; <kbd>R</kbd> from start &middot; <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> speed 100 / 50 / 25 % &middot; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> previous / next take<br>
-Red: marked clicks (numbered). Cyan bars along the top: the model's clicks. Thin red line: energy above 1.5 kHz (clicks spike).<br>
-Blue band: detected speech. Yellow ticks: logged key events. <kbd>F</kbd> click filter &middot; <kbd>U</kbd> use model marks.</div>
-<div><b>Model marks</b> <span id=run></span><ol id=pmarks></ol></div></div>
+<div class=bar>
+ <button onclick=go(-1)>&larr; prev</button><button onclick=accept()><b>&#10003; accept &amp; next (Enter)</b></button><button onclick=go(1)>next &rarr;</button>
+ <button onclick=undoOne()>&#8630; undo (Z)</button><button onclick=resetTake()>reset to saved</button>
+ <label>show <select id=q onchange=refilter()>
+  <option value=todo>to do: disagreements not yet reviewed</option><option value=dis>all disagreements</option>
+  <option value=rev>already reviewed (re-check)</option><option value=all>all takes</option></select></label></div>
+<div class=bar>
+ <button onclick=toggle()>&#9654; play / stop (Space)</button><button onclick=play(0)>&#8635; from start (R)</button>
+ <label><input type=checkbox id=loop> loop selected (L)</label>
+ <span class=grp>speed <button data-r=1 style=font-weight:bold onclick=speed(1)>100%</button><button data-r=.5 onclick=speed(.5)>50%</button><button data-r=.25 onclick=speed(.25)>25%</button></span>
+ <span class=grp>volume <button data-g=0 style=font-weight:bold onclick=vol(0)>normalised</button><button data-g=12 onclick=vol(12)>+12 dB</button><button data-g=24 onclick=vol(24)>+24 dB</button></span>
+ <label><input type=checkbox id=hp onchange=route()> only &gt;1.5 kHz (F)</label></div>
+<div style="display:flex;gap:40px;align-items:flex-start"><div><b id=count></b><table id=marks></table></div>
+<div class=legend>
+<span class=sw style=background:#3c6></span>your clicks (saved as labels) &nbsp; <span class=sw style="border:2px dashed #2cd"></span>model suggestion you haven't marked &nbsp; <span class=sw style=background:#2dd;height:5px></span>model's detections
+&nbsp; <span class=sw style=background:#fd3;width:3px></span>logged key event &nbsp; <span class=sw style=background:#12304a></span>speech<br>
+<b>Add</b> a click: drag across it on the waveform, or press <kbd>M</kbd> at the white line, or click the <b>+</b> on a model suggestion.<br>
+<b>Remove</b> a click: click its <b>&times;</b>, or right-click it, or select it and press <kbd>Delete</kbd>.<br>
+<b>Adjust</b>: drag a green edge. Drawing over an existing click replaces it.<br>
+<b>Listen</b>: click any box (or a row in the list) to select it and hear just that stretch. <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> next / previous box, <kbd>P</kbd> play it again, <kbd>A</kbd> add the selected suggestion.<br>
+Click empty waveform to move the white line. <kbd>Z</kbd> undo &middot; <kbd>Esc</kbd> deselect &middot; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> take (edits are saved when you leave a take) &middot; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> speed &middot; <kbd>F</kbd> filter</div></div>
 <script>
-let T=[],i=0,buf=null,ac=new AudioContext(),sel=-1,drag=null,src=null,t0=0,off=0,head=0,rate=1,wave=null,trace=null,gdb=0,peak=1,order=[],oi=0;
-const c=document.getElementById('c'),g=c.getContext('2d'),W=c.width,H=c.height;
+let T=[],order=[],oi=0,i=-1,buf=null,ac=new AudioContext(),sel=null,drag=null,src=null,t0=0,off=0,head=0,rate=1,wave=null,trace=null,gdb=0,peak=1,undo=[],saved='[]';
+const c=document.getElementById('c'),g=c.getContext('2d'),W=c.width,H=c.height,$=id=>document.getElementById(id);
 fetch('/takes').then(r=>r.json()).then(d=>{T=d;refilter()});
-function refilter(){const only=document.getElementById('dis').checked&&T.some(t=>'disagree' in t);
- order=T.map((t,k)=>k).filter(k=>!only||T[k].disagree);order.sort((a,b)=>(T[a].split=='test'?0:1)-(T[b].split=='test'?0:1)||a-b);
- oi=Math.max(0,order.findIndex(k=>!T[k].reviewed_at));if(order.length){i=order[oi];load()}}
+window.onbeforeunload=e=>{if(i>=0&&dirty())e.preventDefault()};
+async function refilter(){if(i>=0&&dirty())await save();const q=$('q').value,hasP=T.some(t=>'disagree' in t);
+ const keep={todo:t=>(!hasP||t.disagree)&&!t.reviewed_at,dis:t=>!hasP||t.disagree,rev:t=>!!t.reviewed_at,all:t=>true}[q];
+ order=T.map((t,k)=>k).filter(k=>keep(T[k]));order.sort((a,b)=>(T[a].split=='test'?0:1)-(T[b].split=='test'?0:1)||a-b);
+ oi=Math.max(0,order.indexOf(i));if(order.length){i=order[oi];load()}else{stop();i=-1;g.clearRect(0,0,W,H);$('pos').textContent='nothing to show here';$('meta').textContent=$('state').textContent='';$('marks').innerHTML=$('count').textContent=''}}
 const gain=ac.createGain(),hpf=ac.createBiquadFilter(),lim=ac.createDynamicsCompressor();
 hpf.type='highpass';hpf.frequency.value=1500;lim.threshold.value=-3;lim.knee.value=0;lim.ratio.value=20;lim.attack.value=.001;lim.release.value=.05;
 lim.connect(ac.destination);function route(){gain.disconnect();hpf.disconnect();
- if(document.getElementById('hp').checked){gain.connect(hpf);hpf.connect(lim)}else gain.connect(lim)}route();
+ if($('hp').checked){gain.connect(hpf);hpf.connect(lim)}else gain.connect(lim)}route();
 function vol(db){gdb=db;document.querySelectorAll('[data-g]').forEach(b=>b.style.fontWeight=+b.dataset.g==db?'bold':'');setGain()}
 function setGain(){gain.gain.value=.9/peak*10**(gdb/20)}
-async function load(){stop();head=0;sel=-1;const t=T[i];document.getElementById('pos').textContent=`${oi+1} / ${order.length}${order.length<T.length?' (of '+T.length+')':''} · ${t.split}`;
- document.getElementById('meta').textContent=`${t.id} · ${t.duration_s}s · ${t.flags.join(' ')}`;
- document.getElementById('state').innerHTML=t.reviewed_at?'<span class=ok>reviewed</span>':'<span class=flag>not reviewed</span>';
+async function load(){stop();head=0;sel=null;undo=[];const t=T[i];saved=JSON.stringify(t.clicks);
+ $('pos').textContent=`${oi+1} / ${order.length}${order.length<T.length?' (of '+T.length+')':''} · ${t.split}`;
+ $('meta').textContent=`${t.id} · ${t.duration_s}s · ${t.flags.join(' ')}`;
  buf=await ac.decodeAudioData(await (await fetch('/audio/'+t.file)).arrayBuffer());wave=null;trace=null;
  peak=1e-6;for(const v of buf.getChannelData(0))peak=Math.max(peak,Math.abs(v));setGain();draw();trace=await hpTrace();draw()}
 async function hpTrace(){const o=new OfflineAudioContext(1,buf.length,buf.sampleRate),s=o.createBufferSource(),f=o.createBiquadFilter();
@@ -94,65 +105,94 @@ async function hpTrace(){const o=new OfflineAudioContext(1,buf.length,buf.sample
  const d=(await o.startRendering()).getChannelData(0),step=d.length/W,e=new Float32Array(W);
  for(let x=0;x<W;x++){let a=0,n=0;for(let k=Math.floor(x*step);k<(x+1)*step;k++){a+=d[k]*d[k];n++}e[x]=10*Math.log10(a/Math.max(1,n)+1e-12)}
  const srt=[...e].sort((a,b)=>a-b),lo=srt[Math.floor(W*.1)],hi=srt[W-1];return e.map(v=>Math.max(0,(v-lo)/Math.max(1,hi-lo)))}
-const X=s=>s/T[i].duration_s*W, S=x=>Math.min(T[i].duration_s,Math.max(0,x/W*T[i].duration_s)), ex=e=>e.offsetX*W/c.clientWidth;
+const X=s=>s/T[i].duration_s*W, S=x=>Math.min(T[i].duration_s,Math.max(0,x/W*T[i].duration_s));
+const ex=e=>e.offsetX*W/c.clientWidth, ey=e=>e.offsetY*H/c.clientHeight;
+const ov=(a,b)=>a[0]<=b[1]&&b[0]<=a[1], dirty=()=>JSON.stringify(T[i].clicks)!==saved;
+// Boxes on the waveform: your clicks ('mine'), plus model detections that overlap none of them ('model')
+function cands(){const t=T[i],p=t.pred||[];
+ const r=t.clicks.map((k,j)=>({kind:'mine',j,k,both:p.some(q=>ov(q,k))}));
+ p.forEach((k,j)=>{if(!t.clicks.some(q=>ov(q,k)))r.push({kind:'model',j,k})});return r.sort((a,b)=>a.k[0]-b.k[0])}
+const isSel=d=>!!sel&&sel.kind==d.kind&&sel.j==d.j, selK=()=>sel&&(sel.kind=='mine'?T[i].clicks:T[i].pred)[sel.j];
+const span=k=>{const x0=X(k[0]);return [x0,Math.max(3,X(k[1])-x0)]}, hbox=k=>{const [x0,w]=span(k);return [x0+w+2,4,20]};
 function waveform(){const o=document.createElement('canvas');o.width=W;o.height=H;const q=o.getContext('2d'),d=buf.getChannelData(0),step=d.length/W;
- let m=0;for(const v of d)m=Math.max(m,Math.abs(v));q.strokeStyle='#ccc';q.beginPath();
+ let m=0;for(const v of d)m=Math.max(m,Math.abs(v));q.strokeStyle='#bbb';q.beginPath();
  for(let x=0;x<W;x++){let lo=0,hi=0;for(let k=Math.floor(x*step);k<(x+1)*step;k++){lo=Math.min(lo,d[k]);hi=Math.max(hi,d[k])}
   q.moveTo(x,H/2-hi/m*H/2);q.lineTo(x,H/2-lo/m*H/2)}q.stroke();return o}
 function draw(){const t=T[i];g.clearRect(0,0,W,H);
- if(t.speech_s){g.fillStyle='#123a5a';g.fillRect(X(t.speech_s[0]),0,X(t.speech_s[1])-X(t.speech_s[0]),H)}
+ if(t.speech_s){g.fillStyle='#12304a';g.fillRect(X(t.speech_s[0]),0,X(t.speech_s[1])-X(t.speech_s[0]),H)}
  g.drawImage(wave=wave||waveform(),0,0);
- t.clicks.forEach((k,j)=>{const x0=X(k[0]),w=Math.max(3,X(k[1])-x0);g.fillStyle=j==sel?'rgba(255,80,80,.65)':'rgba(220,40,40,.45)';g.fillRect(x0,0,w,H);
-  g.fillStyle=j==sel?'#f77':'#e44';g.fillRect(x0,0,w,4);g.fillRect(x0,H-4,w,4);g.font='bold 22px system-ui';g.fillText(j+1,x0+w+3,24)});
- if(trace){g.strokeStyle='#f44';g.lineWidth=1.5;g.beginPath();trace.forEach((v,x)=>x?g.lineTo(x,H-v*(H-30)):g.moveTo(x,H-v*(H-30)));g.stroke();g.lineWidth=1}
- g.fillStyle='#2dd';(t.pred||[]).forEach(k=>g.fillRect(X(k[0]),0,Math.max(3,X(k[1])-X(k[0])),10));
+ if(trace){g.strokeStyle='rgba(255,150,60,.5)';g.beginPath();trace.forEach((v,x)=>x?g.lineTo(x,H-v*(H-30)):g.moveTo(x,H-v*(H-30)));g.stroke()}
  g.fillStyle='#fd3';t.key_events_s.forEach(e=>g.fillRect(X(e)-1,H-14,3,14));
+ cands().forEach((d,n)=>{const [x0,w]=span(d.k),on=isSel(d),[hx,hy,hs]=hbox(d.k);
+  if(d.kind=='mine'){g.fillStyle=on?'rgba(80,230,120,.5)':'rgba(60,200,100,.3)';g.fillRect(x0,0,w,H);g.fillStyle='#3c6';g.fillRect(x0,0,2,H);g.fillRect(x0+w-2,0,2,H)}
+  else{g.fillStyle=on?'rgba(40,200,230,.3)':'rgba(40,200,230,.1)';g.fillRect(x0,0,w,H);g.setLineDash([6,4]);g.strokeStyle='#2cd';g.lineWidth=2;g.strokeRect(x0+1,1,w-2,H-2);g.setLineDash([]);g.lineWidth=1}
+  if(on){g.strokeStyle='#fd3';g.lineWidth=3;g.strokeRect(x0-2,1.5,w+4,H-3);g.lineWidth=1}
+  g.fillStyle=d.kind=='mine'?'#b33':'#178';g.fillRect(hx,hy,hs,hs);g.fillStyle='#fff';g.font='bold 18px system-ui';g.textAlign='center';
+  g.fillText(d.kind=='mine'?'×':'+',hx+hs/2,hy+hs-4);g.font='bold 14px system-ui';g.fillStyle='#ddd';g.fillText(n+1,x0+w/2,H-22);g.textAlign='left'});
+ g.fillStyle='#2dd';(t.pred||[]).forEach(k=>{const [x0,w]=span(k);g.fillRect(x0,0,w,5)});
  g.fillStyle='#fff';g.fillRect(X(head)-1,0,2,H);list()}
-function list(){const t=T[i];document.getElementById('run').textContent=t.pred_run?`(${t.pred_run})`:'(none)';
- document.getElementById('pmarks').innerHTML=(t.pred||[]).map((k,j)=>`<li>${k[0].toFixed(3)}–${k[1].toFixed(3)} s
-  <button onclick="play(${k[0]},${k[1]})" title="play just this mark">&#9654;</button> <button onclick="add(${k[0]},${k[1]})">+ add as click</button></li>`).join('');document.getElementById('count').textContent=`${t.clicks.length} click${t.clicks.length==1?'':'s'} marked`;
- document.getElementById('marks').innerHTML=t.clicks.map((k,j)=>`<li class=${j==sel?'sel':''}>${k[0].toFixed(3)}–${k[1].toFixed(3)} s
-  <button onclick="sel=${j};draw();playMark(T[i].clicks[${j}])" title="play just this mark">&#9654;</button> <button onclick="del(${j})">&times;</button></li>`).join('')}
+function list(){const t=T[i],cs=cands();
+ $('state').innerHTML=(t.reviewed_at?`<span class=ok>reviewed ${t.reviewed_at.slice(0,16).replace('T',' ')}</span>`:'<span class=flag>not reviewed</span>')+
+  (dirty()?' <span class=dirty>· unsaved changes (saved on Enter or when you leave the take)</span>':'');
+ $('count').textContent=`${t.clicks.length} click${t.clicks.length==1?'':'s'} marked`+(t.pred_run?` · model ${t.pred_run}`:'');
+ $('marks').innerHTML=cs.map((d,n)=>`<tr class="c ${isSel(d)?'sel':''}" onclick="pick('${d.kind}',${d.j})"><td>${n+1}</td><td>${d.k[0].toFixed(3)}–${d.k[1].toFixed(3)} s</td>
+  <td>${d.kind=='model'?'<span class="b model">model only, not marked</span>':d.both?'<span class="b mine">your click · model agrees</span>':'<span class="b miss">your click · model missed it</span>'}</td>
+  <td><button onclick="event.stopPropagation();pick('${d.kind}',${d.j})">&#9654;</button></td>
+  <td>${d.kind=='model'?`<button onclick="event.stopPropagation();addModel(${d.j})">+ add</button>`:`<button onclick="event.stopPropagation();remove(${d.j})">&times; remove</button>`}</td></tr>`).join('')}
 function play(from,to){stop();ac.resume();from=Math.max(0,Math.min(from,T[i].duration_s-.01));src=ac.createBufferSource();src.buffer=buf;src.playbackRate.value=rate;
  const env=ac.createGain(),now=ac.currentTime;src.connect(env);env.connect(gain);
  if(to!=null){const dur=Math.max(.005,to-from),real=dur/rate,f=Math.min(.003,real/4);  // 3 ms fades: hard edges would add clicks of their own
   env.gain.setValueAtTime(0,now);env.gain.linearRampToValueAtTime(1,now+f);env.gain.setValueAtTime(1,now+real-f);env.gain.linearRampToValueAtTime(0,now+real);
   src.start(0,from,dur)}else src.start(0,from);
  t0=now;off=from;head=from;const me=src;
- src.onended=()=>{if(src!==me)return;src=null;if(to!=null&&document.getElementById('loop').checked)setTimeout(()=>{if(!src)play(from,to)},250);else draw()};tick()}
-function playMark(k){if(k)play(k[0],k[1])}
-function playSel(){playMark(T[i].clicks[sel])}
+ src.onended=()=>{if(src!==me)return;src=null;if(to!=null&&$('loop').checked)setTimeout(()=>{if(!src)play(from,to)},250);else draw()};tick()}
+function playSel(){const k=selK();if(k)play(k[0],k[1])}
 function stop(){if(src){const s=src;src=null;s.stop()}}
 function toggle(){src?stop():play(head>=T[i].duration_s-.02?0:head)}
 function speed(r){rate=r;document.querySelectorAll('[data-r]').forEach(b=>b.style.fontWeight=+b.dataset.r==r?'bold':'');if(src)play(head)}
 function tick(){if(!src)return;head=Math.min(T[i].duration_s,off+(ac.currentTime-t0)*rate);draw();requestAnimationFrame(tick)}
-function add(a,b){const t=T[i];t.clicks.push([+a.toFixed(3),+b.toFixed(3)]);t.clicks.sort((p,q)=>p[0]-q[0]);sel=t.clicks.findIndex(k=>k[0]==+a.toFixed(3));draw()}
-function markHere(){add(head,Math.min(T[i].duration_s,head+.02))}
-function del(j){T[i].clicks.splice(j,1);sel=-1;draw()}
-function useModel(){T[i].clicks=(T[i].pred||[]).map(k=>[...k]);sel=-1;draw()}
-function clearAll(){T[i].clicks=[];sel=-1;draw()}
-function edge(x){const k=T[i].clicks;for(let j=0;j<k.length;j++)for(const e of [0,1])if(Math.abs(x-X(k[j][e]))<6)return [j,e];return null}
-function inside(x){return T[i].clicks.findIndex(k=>x>=X(k[0])&&x<=X(k[1]))}
-c.onmousemove=e=>{const x=ex(e);if(!drag){c.style.cursor=edge(x)?'ew-resize':inside(x)>=0?'pointer':'text';return}
- if(!e.buttons)return;drag.moved=drag.moved||Math.abs(x-drag.x)>4;if(!drag.moved)return;
+function pick(kind,j){sel={kind,j};draw();playSel()}
+function step(n){const cs=cands();if(!cs.length)return;const k=cs.findIndex(isSel),d=cs[k<0?(n>0?0:cs.length-1):(k+n+cs.length)%cs.length];pick(d.kind,d.j)}
+function snap(){undo.push(JSON.stringify(T[i].clicks))}
+// Add a click; any of your clicks it overlaps are replaced, so drawing over a click redraws it
+function setMine(k){const t=T[i];k=[+k[0].toFixed(3),+k[1].toFixed(3)];snap();t.clicks=t.clicks.filter(q=>!ov(q,k));t.clicks.push(k);
+ t.clicks.sort((a,b)=>a[0]-b[0]);sel={kind:'mine',j:t.clicks.indexOf(k)};draw()}
+function addModel(j){setMine([...T[i].pred[j]]);playSel()}
+function remove(j){snap();T[i].clicks.splice(j,1);sel=null;draw()}
+function markHere(){setMine([head,Math.min(T[i].duration_s,head+.02)]);playSel()}
+function undoOne(){if(!undo.length)return;T[i].clicks=JSON.parse(undo.pop());sel=null;draw()}
+function resetTake(){if(dirty()){snap();T[i].clicks=JSON.parse(saved);sel=null;draw()}}
+function handleAt(x,y){return cands().find(d=>{const [hx,hy,hs]=hbox(d.k);return x>=hx&&x<=hx+hs&&y>=hy&&y<=hy+hs})}
+function edge(x){const k=T[i].clicks;for(let j=0;j<k.length;j++)for(const e of [0,1])if(Math.abs(x-X(k[j][e]))<5)return [j,e];return null}
+function boxAt(x){const cs=cands();return cs.find(d=>d.kind=='mine'&&inBox(d,x))||cs.find(d=>inBox(d,x))}
+function inBox(d,x){const [x0,w]=span(d.k);return x>=x0-1&&x<=x0+w+1}
+c.oncontextmenu=e=>{e.preventDefault();const d=boxAt(ex(e));if(d&&d.kind=='mine')remove(d.j)};
+c.onmousemove=e=>{const x=ex(e);if(!drag){c.style.cursor=handleAt(x,ey(e))?'pointer':edge(x)?'ew-resize':boxAt(x)?'pointer':'crosshair';return}
+ if(!e.buttons)return;if(!drag.moved&&Math.abs(x-drag.x)>4){drag.moved=true;if(drag.edge)snap()}if(!drag.moved)return;
  if(drag.edge){const k=T[i].clicks[drag.edge[0]];k[drag.edge[1]]=+S(x).toFixed(3);if(k[0]>k[1]){k.reverse();drag.edge[1]^=1}draw()}
- else{draw();g.fillStyle='rgba(255,200,0,.35)';g.fillRect(Math.min(drag.x,x),0,Math.abs(x-drag.x),H)}};
-c.onmousedown=e=>{const x=ex(e);drag={x,edge:edge(x),moved:false};if(drag.edge){sel=drag.edge[0];draw()}};
+ else{draw();g.fillStyle='rgba(80,230,120,.35)';g.fillRect(Math.min(drag.x,x),0,Math.abs(x-drag.x),H)}};
+c.onmousedown=e=>{if(e.button)return;const x=ex(e),h=handleAt(x,ey(e));
+ if(h){drag=null;h.kind=='mine'?remove(h.j):addModel(h.j);return}
+ drag={x,edge:edge(x),moved:false,box:boxAt(x)};if(drag.edge){sel={kind:'mine',j:drag.edge[0]};draw()}};
 c.onmouseup=e=>{if(!drag)return;const x=ex(e),d=drag;drag=null;
  if(d.edge&&d.moved){playSel();return}
- if(d.moved){add(S(Math.min(d.x,x)),S(Math.max(d.x,x)));playSel();return}
- const j=inside(x);sel=j;if(j>=0){draw();playSel();return}head=S(x);if(src)play(head);else draw()};
-function save(){T[i].reviewed_at=new Date().toISOString();return fetch('/save',{method:'POST',body:JSON.stringify(T[i])})}
+ if(d.moved){setMine([S(Math.min(d.x,x)),S(Math.max(d.x,x))]);playSel();return}
+ if(d.box){pick(d.box.kind,d.box.j);return}
+ sel=null;head=S(x);if(src)play(head);else draw()};
+async function save(){const t=T[i];t.reviewed_at=new Date().toISOString();await fetch('/save',{method:'POST',body:JSON.stringify(t)});saved=JSON.stringify(t.clicks)}
 async function accept(){await save();go(1)}
-function go(n){oi=Math.min(order.length-1,Math.max(0,oi+n));i=order[oi];load()}
-function nextTodo(){const j=order.findIndex((k,q)=>q>oi&&!T[k].reviewed_at);if(j>=0){oi=j;i=order[oi];load()}}
-document.onkeydown=e=>{const k=e.key;if(e.target.tagName=='BUTTON'&&(k==' '||k=='Enter'))e.preventDefault();
- if(k==' ')toggle();else if(k=='r'||k=='R')play(0);else if(k=='m'||k=='M')markHere();else if(k=='u'||k=='U')useModel();else if(k=='p'||k=='P')playSel();
- else if(k=='l'||k=='L'){const l=document.getElementById('loop');l.checked=!l.checked}
- else if(k=='f'||k=='F'){const h=document.getElementById('hp');h.checked=!h.checked;route()}else if(k=='1')speed(1);else if(k=='2')speed(.5);
- else if(k=='3')speed(.25);else if(k=='Enter')accept();else if(k=='ArrowLeft')go(-1);else if(k=='ArrowRight')go(1);
- else if((k=='Backspace'||k=='Delete')&&sel>=0){e.preventDefault();del(sel)}};
+async function go(n){if(i<0)return;if(dirty())await save();const k=Math.min(order.length-1,Math.max(0,oi+n));if(k==oi){draw();return}oi=k;i=order[oi];load()}
+document.onkeydown=e=>{const k=e.key.toLowerCase();if(e.target.tagName=='SELECT'||e.ctrlKey&&k!='z'||e.metaKey||e.altKey)return;
+ if(e.target.tagName=='BUTTON'&&(k==' '||k=='enter'))e.preventDefault();
+ if(k==' ')toggle();else if(k=='r')play(0);else if(k=='m')markHere();else if(k=='p')playSel();else if(k=='z')undoOne();
+ else if(k=='tab'){e.preventDefault();step(e.shiftKey?-1:1)}else if(k=='escape'){sel=null;draw()}
+ else if(k=='a'&&sel&&sel.kind=='model')addModel(sel.j);
+ else if((k=='backspace'||k=='delete'||k=='x')&&sel&&sel.kind=='mine'){e.preventDefault();remove(sel.j)}
+ else if(k=='l')$('loop').checked=!$('loop').checked;else if(k=='f'){$('hp').checked=!$('hp').checked;route()}
+ else if(k=='1')speed(1);else if(k=='2')speed(.5);else if(k=='3')speed(.25);
+ else if(k=='enter')accept();else if(k=='arrowleft')go(-1);else if(k=='arrowright')go(1)};
 </script>"""
+
 
 
 class H(BaseHTTPRequestHandler):

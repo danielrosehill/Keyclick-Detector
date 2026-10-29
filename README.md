@@ -58,6 +58,11 @@ uv run scripts/predict_all.py v1
 uv run scripts/review.py
 ```
 
+Review page (controls listed at the top of `scripts/review.py`): green boxes are your clicks, dashed cyan
+boxes are model detections you haven't marked. Drag to add a click, `+` on a cyan box to adopt it, `×` or
+right-click to remove, Z to undo; clicking any box plays just that stretch. Edits save on Enter or when you leave
+the take. The queue selector can show already-reviewed takes to re-check them.
+
 Review page listening aids: playback normalised to the take's peak with +12 / +24 dB boosts behind a limiter,
 a click filter (plays only >1.5 kHz), and a red trace of >1.5 kHz energy over the waveform. Only the page
 amplifies or filters; the training audio is left raw so the model learns on real, noisy recordings.
