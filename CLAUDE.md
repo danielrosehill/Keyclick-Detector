@@ -1,6 +1,6 @@
 # Keyclick-Detector: notes for agents
 
-Public. Start at `README.md`. Release tier: **small** (`v1.N`).
+Public. Start at `README.md`. Release tier: **small** (`v1.N`). Shell alias: `z clicktrainer` (zalias, 2026-10-29).
 
 - Training data is **only** Daniel's own recordings (raw originals in HF dataset `danielrosehill/Wake-Words`).
   No third-party audio (ESC-50, FSD50K, etc.): Daniel's decision, 2026-10-29.
