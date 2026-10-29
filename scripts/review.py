@@ -10,7 +10,8 @@ Page (rebuilt 2026-10-29 so each gesture does one thing):
 - A model box's x dismisses it as not a click (grey; saved as `rejected`, model spans you said are not clicks).
 - Add: drag across the waveform, M at the white line, or the + on a model box (A when it is selected).
   Remove: the x on a green box, right-click it, or Delete / Backspace / X when selected. Drawing over a click replaces it.
-  Adjust: drag a green edge. Z undoes; "reset to saved" returns to the last save.
+  Adjust: drag a green edge (nearest within 10 px) or press inside a green box and drag (moves its nearer edge), so a
+  drag that starts on a click never draws a new one; [ ] nudge the selected click's start 5 ms, Shift+[ ] its end. Z undoes; "reset to saved" returns to the last save.
 - Clicking any box or list row selects it and plays only its bounds (3 ms fades so the cut edges don't click);
   Tab / Shift+Tab step through boxes, P replays, L loops. Clicking empty waveform moves the white line.
 - Enter saves and moves on; leaving a take with edits (arrows, prev/next, queue change) also saves it.
@@ -78,7 +79,7 @@ table{border-collapse:collapse}td{padding:3px 8px;white-space:nowrap}tr.c{cursor
 &nbsp; <span class=sw style=background:#fd3;width:3px></span>logged key event &nbsp; <span class=sw style=background:#12304a></span>speech<br>
 <b>Add</b> a click: drag across it on the waveform, or press <kbd>M</kbd> at the white line, or click the <b>+</b> on a model suggestion.<br>
 <b>Remove</b> a click, or <b>dismiss</b> a model suggestion as not a click: click its <b>&times;</b>, or right-click it, or select it and press <kbd>Delete</kbd>.<br>
-<b>Adjust</b>: drag a green edge. Drawing over an existing click replaces it.<br>
+<b>Adjust</b>: drag a green box's edge, or press inside it and drag (moves the nearer edge); new clicks are only drawn from empty waveform. Or select it and nudge 5 ms: <kbd>[</kbd> <kbd>]</kbd> start, <kbd>Shift</kbd>+<kbd>[</kbd> <kbd>]</kbd> end.<br>
 <b>Listen</b>: click any box (or a row in the list) to select it and hear just that stretch. <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> next / previous box, <kbd>P</kbd> play it again, <kbd>A</kbd> add the selected suggestion.<br>
 Click empty waveform to move the white line. <kbd>Z</kbd> undo &middot; <kbd>Esc</kbd> deselect &middot; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> take (edits are saved when you leave a take) &middot; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> speed &middot; <kbd>F</kbd> filter</div></div>
 <script>
@@ -170,12 +171,17 @@ function markHere(){setMine([head,Math.min(T[i].duration_s,head+.02)]);playSel()
 function undoOne(){if(undo.length)restore(undo.pop())}
 function resetTake(){if(dirty()){snap();restore(saved)}}
 function handleAt(x,y){for(const d of cands())for(const [a,,,hx,hy,hs] of handles(d))if(x>=hx&&x<=hx+hs&&y>=hy&&y<=hy+hs)return [d,a];return null}
-function edge(x){const k=T[i].clicks;for(let j=0;j<k.length;j++)for(const e of [0,1])if(Math.abs(x-X(k[j][e]))<5)return [j,e];return null}
+// Edge grabbing: the nearest edge within 10 screen px; pressing inside a green box grabs its nearer edge,
+// so resizing never needs a pixel-exact hit and a drag that starts on a click can't draw a new one
+const sc=()=>W/c.clientWidth;
+function edge(x){const k=T[i].clicks;let best=null,bd=10*sc();for(let j=0;j<k.length;j++)for(const e of [0,1]){const dd=Math.abs(x-X(k[j][e]));if(dd<bd){bd=dd;best=[j,e]}}
+ if(best)return best;const j=k.findIndex(q=>x>=X(q[0])&&x<=X(q[1]));return j<0?null:[j,x-X(k[j][0])<X(k[j][1])-x?0:1]}
+function nudge(e,ds){const k=selK();if(!k||sel.kind!='mine')return;snap();k[e]=+Math.min(T[i].duration_s,Math.max(0,k[e]+ds)).toFixed(3);if(k[0]>k[1])k.reverse();draw();playSel()}
 function boxAt(x){const cs=cands();return cs.find(d=>d.kind=='mine'&&inBox(d,x))||cs.find(d=>inBox(d,x))}
 function inBox(d,x){const [x0,w]=span(d.k);return x>=x0-1&&x<=x0+w+1}
 c.oncontextmenu=e=>{e.preventDefault();const d=boxAt(ex(e));if(d)d.kind=='mine'?remove(d.j):reject(d.j)};
 c.onmousemove=e=>{const x=ex(e);if(!drag){c.style.cursor=handleAt(x,ey(e))?'pointer':edge(x)?'ew-resize':boxAt(x)?'pointer':'crosshair';return}
- if(!e.buttons)return;if(!drag.moved&&Math.abs(x-drag.x)>4){drag.moved=true;if(drag.edge)snap()}if(!drag.moved)return;
+ if(!e.buttons)return;if(!drag.moved&&Math.abs(x-drag.x)>(drag.edge?3:8)*sc()){drag.moved=true;if(drag.edge)snap()}if(!drag.moved)return;
  if(drag.edge){const k=T[i].clicks[drag.edge[0]];k[drag.edge[1]]=+S(x).toFixed(3);if(k[0]>k[1]){k.reverse();drag.edge[1]^=1}draw()}
  else{draw();g.fillStyle='rgba(80,230,120,.35)';g.fillRect(Math.min(drag.x,x),0,Math.abs(x-drag.x),H)}};
 c.onmousedown=e=>{if(e.button)return;const x=ex(e),h=handleAt(x,ey(e));
@@ -194,6 +200,7 @@ document.onkeydown=e=>{const k=e.key.toLowerCase();if(e.target.tagName=='SELECT'
  if(k==' ')toggle();else if(k=='r')play(0);else if(k=='m')markHere();else if(k=='p')playSel();else if(k=='z')undoOne();
  else if(k=='tab'){e.preventDefault();step(e.shiftKey?-1:1)}else if(k=='escape'){sel=null;draw()}
  else if(k=='a'&&sel&&sel.kind=='model')addModel(sel.j);
+ else if(k=='['||k=='{'||k==']'||k=='}')nudge(k=='['||k==']'?0:1,k=='['||k=='{'?-.005:.005);
  else if((k=='backspace'||k=='delete'||k=='x')&&sel){e.preventDefault();sel.kind=='mine'?remove(sel.j):reject(sel.j)}
  else if(k=='l')$('loop').checked=!$('loop').checked;else if(k=='f'){$('hp').checked=!$('hp').checked;route()}
  else if(k=='1')speed(1);else if(k=='2')speed(.5);else if(k=='3')speed(.25);

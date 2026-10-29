@@ -1,0 +1,48 @@
+{
+ "name": "v3",
+ "epochs": 80,
+ "train_takes": 204,
+ "test_takes": 43,
+ "params": 75905,
+ "test": {
+  "all": {
+   "clicks": 73,
+   "found": 73,
+   "missed": 0,
+   "false_alarms": 31,
+   "recall": 1.0,
+   "precision": 0.702,
+   "onset_err_ms_median": 7.5
+  },
+  "edges": {
+   "clicks": 73,
+   "found": 72,
+   "missed": 1,
+   "false_alarms": 27,
+   "recall": 0.986,
+   "precision": 0.727,
+   "onset_err_ms_median": 7.5
+  }
+ },
+ "train": {
+  "all": {
+   "clicks": 341,
+   "found": 340,
+   "missed": 1,
+   "false_alarms": 125,
+   "recall": 0.997,
+   "precision": 0.731,
+   "onset_err_ms_median": 3.0
+  },
+  "edges": {
+   "clicks": 341,
+   "found": 340,
+   "missed": 1,
+   "false_alarms": 103,
+   "recall": 0.997,
+   "precision": 0.767,
+   "onset_err_ms_median": 3.0
+  }
+ },
+ "reviewed_takes": 93
+}

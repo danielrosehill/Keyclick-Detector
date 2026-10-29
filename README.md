@@ -8,7 +8,12 @@ release ~55 ms later) in the take. A fixed trim either cuts too little (slow pre
 much. A detector that returns click timestamps lets a trim cut exactly after the last leading click and
 before the first trailing one.
 
-Status (2026-10-29): v2 trained on auto-labels; reviewing model/label disagreements before v3.
+Status (2026-10-29): v3 trained with 93 reviewed takes (auto-labels for the rest); reviewing its disagreements next.
+
+v3 (`runs/v3/metrics.json`), test split (43 takes, 73 click events), outside speech, against reviewed-over-auto labels:
+recall 0.99 (1 missed), precision 0.73 (27 extra detections), median onset error 7.5 ms (v2: 2.5 ms; on train v3 is
+3.0 ms, so the jump is on the test labels, likely reviewed boxes starting earlier than the auto-labeller's onsets;
+not yet checked). 117 takes disagree with v3, 47 of them not yet reviewed.
 
 A click is an **event**: transients less than 0.15 s apart are merged (`keyclick.features.merge_events`), since
 one key press shows up as 2-4 transients over ~50-150 ms (finger on the cap, bottoming out, release) but is
@@ -60,7 +65,7 @@ uv run scripts/review.py
 
 Review page (controls listed at the top of `scripts/review.py`): green boxes are your clicks, dashed cyan
 boxes are model detections you haven't marked. Drag to add a click, `+` on a cyan box to adopt it, `×` or
-right-click to remove a click or dismiss a cyan box as not a click, Z to undo; clicking any box plays just that stretch. Edits save on Enter or when you leave
+right-click to remove a click or dismiss a cyan box as not a click, Z to undo. Resize by dragging a green box's edge or from inside it (the nearer edge moves; a drag that starts on a click never draws a new one), or nudge the selected click 5 ms with `[` `]` (start) and Shift+`[` `]` (end); clicking any box plays just that stretch. Edits save on Enter or when you leave
 the take. The queue selector can show already-reviewed takes to re-check them.
 
 Review page listening aids: playback normalised to the take's peak with +12 / +24 dB boosts behind a limiter,
