@@ -5,6 +5,8 @@ Reads labels/auto.jsonl, writes every checked take to labels/reviewed.jsonl (sam
 the last line per id wins), so it can be stopped and resumed. Audio is served from data/wake-words/data.
 Page: click the waveform to move the playhead; drag across it to mark a click (once per click); M marks a
 20 ms click at the playhead; drag a mark's edge to adjust it; click a mark then Delete/Backspace to remove it.
+Clicking a mark, finishing a drag, P, and the list's play buttons play only the mark's bounds (3 ms fades so
+the cut edges don't click); L loops it.
 Space play / stop from the playhead, R from start, 1 / 2 / 3 speed 100 / 50 / 25 %, Enter accept and next,
 Left / Right previous / next take. Marks are numbered on the waveform and listed below it.
 Listening aids: playback normalised to the take's peak, +12 / +24 dB boosts behind a limiter, F plays only >1.5 kHz,
@@ -55,6 +57,7 @@ PAGE = r"""<!doctype html><meta charset=utf-8><title>Keyclick review</title>
 <span>volume <button data-g=0 style=font-weight:bold onclick=vol(0)>normalised</button><button data-g=12 onclick=vol(12)>+12 dB</button><button data-g=24 onclick=vol(24)>+24 dB</button></span>
 <label><input type=checkbox id=hp onchange=route()> click filter (only &gt;1.5 kHz, F)</label>
 <label><input type=checkbox id=dis checked onchange=refilter()> only takes where model and labels disagree</label></div><div class=bar>
+<button onclick=playSel()>&#9654; play selected mark only (P)</button><label><input type=checkbox id=loop> loop it (L)</label>
 <button onclick=markHere()>+ mark click at line (M)</button><button onclick=useModel()>use model marks (U)</button><button onclick=clearAll()>clear all marks</button>
 <button onclick=accept()><b>accept &amp; next (Enter)</b></button><button onclick=nextTodo()>next unreviewed</button></div>
 <div style="display:flex;gap:40px"><div><b id=count></b><ol id=marks></ol></div>
@@ -62,7 +65,8 @@ PAGE = r"""<!doctype html><meta charset=utf-8><title>Keyclick review</title>
 <b>Click</b> the waveform: move the white line there (and keep playing if playing).<br>
 <b>Drag</b> across the waveform: mark that stretch as a click. Do it once per click.<br>
 <kbd>M</kbd>: mark a 20 ms click at the white line. <b>Drag a red edge</b> to adjust a mark.<br>
-<b>Click a red mark</b> to select it; <kbd>Delete</kbd> / <kbd>Backspace</kbd> removes it.<br>
+<b>Click a red mark</b> to select it and hear just that mark; <kbd>P</kbd> plays it again, <kbd>L</kbd> loops it; <kbd>Delete</kbd> / <kbd>Backspace</kbd> removes it.<br>
+A new or adjusted mark plays by itself when you let go, so you can hear exactly what is inside it.<br>
 <kbd>Space</kbd> play / stop from the line &middot; <kbd>R</kbd> from start &middot; <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> speed 100 / 50 / 25 % &middot; <kbd>&larr;</kbd> <kbd>&rarr;</kbd> previous / next take<br>
 Red: marked clicks (numbered). Cyan bars along the top: the model's clicks. Thin red line: energy above 1.5 kHz (clicks spike).<br>
 Blue band: detected speech. Yellow ticks: logged key events. <kbd>F</kbd> click filter &middot; <kbd>U</kbd> use model marks.</div>
@@ -106,11 +110,18 @@ function draw(){const t=T[i];g.clearRect(0,0,W,H);
  g.fillStyle='#fff';g.fillRect(X(head)-1,0,2,H);list()}
 function list(){const t=T[i];document.getElementById('run').textContent=t.pred_run?`(${t.pred_run})`:'(none)';
  document.getElementById('pmarks').innerHTML=(t.pred||[]).map((k,j)=>`<li>${k[0].toFixed(3)}–${k[1].toFixed(3)} s
-  <button onclick="play(${k[0]}-.15)">&#9654;</button> <button onclick="add(${k[0]},${k[1]})">+ add as click</button></li>`).join('');document.getElementById('count').textContent=`${t.clicks.length} click${t.clicks.length==1?'':'s'} marked`;
+  <button onclick="play(${k[0]},${k[1]})" title="play just this mark">&#9654;</button> <button onclick="add(${k[0]},${k[1]})">+ add as click</button></li>`).join('');document.getElementById('count').textContent=`${t.clicks.length} click${t.clicks.length==1?'':'s'} marked`;
  document.getElementById('marks').innerHTML=t.clicks.map((k,j)=>`<li class=${j==sel?'sel':''}>${k[0].toFixed(3)}–${k[1].toFixed(3)} s
-  <button onclick="sel=${j};play(${k[0]}-.15)">&#9654;</button> <button onclick="del(${j})">&times;</button></li>`).join('')}
-function play(from){stop();ac.resume();from=Math.max(0,Math.min(from,T[i].duration_s-.01));src=ac.createBufferSource();src.buffer=buf;src.playbackRate.value=rate;
- src.connect(gain);src.start(0,from);t0=ac.currentTime;off=from;head=from;const me=src;src.onended=()=>{if(src===me){src=null;draw()}};tick()}
+  <button onclick="sel=${j};draw();playMark(T[i].clicks[${j}])" title="play just this mark">&#9654;</button> <button onclick="del(${j})">&times;</button></li>`).join('')}
+function play(from,to){stop();ac.resume();from=Math.max(0,Math.min(from,T[i].duration_s-.01));src=ac.createBufferSource();src.buffer=buf;src.playbackRate.value=rate;
+ const env=ac.createGain(),now=ac.currentTime;src.connect(env);env.connect(gain);
+ if(to!=null){const dur=Math.max(.005,to-from),real=dur/rate,f=Math.min(.003,real/4);  // 3 ms fades: hard edges would add clicks of their own
+  env.gain.setValueAtTime(0,now);env.gain.linearRampToValueAtTime(1,now+f);env.gain.setValueAtTime(1,now+real-f);env.gain.linearRampToValueAtTime(0,now+real);
+  src.start(0,from,dur)}else src.start(0,from);
+ t0=now;off=from;head=from;const me=src;
+ src.onended=()=>{if(src!==me)return;src=null;if(to!=null&&document.getElementById('loop').checked)setTimeout(()=>{if(!src)play(from,to)},250);else draw()};tick()}
+function playMark(k){if(k)play(k[0],k[1])}
+function playSel(){playMark(T[i].clicks[sel])}
 function stop(){if(src){const s=src;src=null;s.stop()}}
 function toggle(){src?stop():play(head>=T[i].duration_s-.02?0:head)}
 function speed(r){rate=r;document.querySelectorAll('[data-r]').forEach(b=>b.style.fontWeight=+b.dataset.r==r?'bold':'');if(src)play(head)}
@@ -128,15 +139,16 @@ c.onmousemove=e=>{const x=ex(e);if(!drag){c.style.cursor=edge(x)?'ew-resize':ins
  else{draw();g.fillStyle='rgba(255,200,0,.35)';g.fillRect(Math.min(drag.x,x),0,Math.abs(x-drag.x),H)}};
 c.onmousedown=e=>{const x=ex(e);drag={x,edge:edge(x),moved:false};if(drag.edge){sel=drag.edge[0];draw()}};
 c.onmouseup=e=>{if(!drag)return;const x=ex(e),d=drag;drag=null;
- if(d.edge&&d.moved)return;
- if(d.moved){add(S(Math.min(d.x,x)),S(Math.max(d.x,x)));return}
- const j=inside(x);sel=j;head=S(x);if(src)play(head);else draw()};
+ if(d.edge&&d.moved){playSel();return}
+ if(d.moved){add(S(Math.min(d.x,x)),S(Math.max(d.x,x)));playSel();return}
+ const j=inside(x);sel=j;if(j>=0){draw();playSel();return}head=S(x);if(src)play(head);else draw()};
 function save(){T[i].reviewed_at=new Date().toISOString();return fetch('/save',{method:'POST',body:JSON.stringify(T[i])})}
 async function accept(){await save();go(1)}
 function go(n){oi=Math.min(order.length-1,Math.max(0,oi+n));i=order[oi];load()}
 function nextTodo(){const j=order.findIndex((k,q)=>q>oi&&!T[k].reviewed_at);if(j>=0){oi=j;i=order[oi];load()}}
 document.onkeydown=e=>{const k=e.key;if(e.target.tagName=='BUTTON'&&(k==' '||k=='Enter'))e.preventDefault();
- if(k==' ')toggle();else if(k=='r'||k=='R')play(0);else if(k=='m'||k=='M')markHere();else if(k=='u'||k=='U')useModel();
+ if(k==' ')toggle();else if(k=='r'||k=='R')play(0);else if(k=='m'||k=='M')markHere();else if(k=='u'||k=='U')useModel();else if(k=='p'||k=='P')playSel();
+ else if(k=='l'||k=='L'){const l=document.getElementById('loop');l.checked=!l.checked}
  else if(k=='f'||k=='F'){const h=document.getElementById('hp');h.checked=!h.checked;route()}else if(k=='1')speed(1);else if(k=='2')speed(.5);
  else if(k=='3')speed(.25);else if(k=='Enter')accept();else if(k=='ArrowLeft')go(-1);else if(k=='ArrowRight')go(1);
  else if((k=='Backspace'||k=='Delete')&&sel>=0){e.preventDefault();del(sel)}};
