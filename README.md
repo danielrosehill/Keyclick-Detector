@@ -8,7 +8,13 @@ release ~55 ms later) in the take. A fixed trim either cuts too little (slow pre
 much. A detector that returns click timestamps lets a trim cut exactly after the last leading click and
 before the first trailing one.
 
-Status (2026-10-29): data and labelling. No model trained yet.
+Status (2026-10-29): v1 trained on auto-labels; reviewing model/label disagreements before v2.
+
+v1 (`runs/v1/metrics.json`), test split (43 takes, 110 labelled clicks), against auto-labels: recall 0.96,
+precision 0.66, median onset error 2.5 ms. Precision is understated: listening to the extra detections shows
+several are real clicks the auto-labeller missed (it drops a second onset within 30 ms of the previous click,
+and faint presses sit at its 5 dB threshold). Others are likely false: a detection at the very start of a
+file (~0.003 s) and some at ~0.09 s. Reviewed labels will settle the numbers.
 
 ## Data
 
@@ -36,13 +42,21 @@ uv sync
 uv run python -c 'from huggingface_hub import snapshot_download as s; s("danielrosehill/Wake-Words", repo_type="dataset", local_dir="data/wake-words", allow_patterns=["data/*/original/**", "data/*/metadata.jsonl"])'
 # 2. First-pass labels -> labels/auto.jsonl
 uv run scripts/autolabel.py
-# 3. Human review -> labels/reviewed.jsonl (open http://127.0.0.1:8765)
+# 3. Train -> runs/<name>/clicknet.pt + metrics.json (CPU, ~2 min for 80 epochs)
+uv run scripts/train.py v1 80
+# 4. Predict over all takes, flag model/label disagreements -> labels/pred-<run>.jsonl
+uv run scripts/predict_all.py v1
+# 5. Review the disagreements -> labels/reviewed.jsonl (open http://127.0.0.1:8765), then retrain
 uv run scripts/review.py
 ```
 
+Review page listening aids: playback normalised to the take's peak with +12 / +24 dB boosts behind a limiter,
+a click filter (plays only >1.5 kHz), and a red trace of >1.5 kHz energy over the waveform. Only the page
+amplifies or filters; the training audio is left raw so the model learns on real, noisy recordings.
+
 `huggingface_hub` is not a project dependency; run step 1 with `uv run --with huggingface_hub`.
 
-Planned after review: a small frame-level classifier (5 ms frames, click / not click), trained on reviewed
+Model (`keyclick/model.py`): a small frame-level classifier (5 ms frames, click / not click), trained on reviewed
 takes with your own clicks re-mixed into the silences of clean takes for augmentation; a held-out set of
 reviewed takes as the test set; a `trim` CLI; weights and the click labels published to Hugging Face.
 
