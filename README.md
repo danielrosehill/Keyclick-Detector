@@ -56,9 +56,11 @@ amplifies or filters; the training audio is left raw so the model learns on real
 
 `huggingface_hub` is not a project dependency; run step 1 with `uv run --with huggingface_hub`.
 
-Model (`keyclick/model.py`): a small frame-level classifier (5 ms frames, click / not click), trained on reviewed
-takes with your own clicks re-mixed into the silences of clean takes for augmentation; a held-out set of
-reviewed takes as the test set; a `trim` CLI; weights and the click labels published to Hugging Face.
+Model (`keyclick/model.py`): log-mel (48 bands, 10 ms window, 5 ms hop) into a small dilated 1-D CNN (~76k
+parameters, ~165 ms receptive field), one click probability per 5 ms frame. Training augments with random gain,
+light noise, and clicks cut from other takes pasted into silence (half after the speech, since trailing clicks
+are rare in the data). Test set: the dataset's own test split. Still to do: a `trim` CLI, and publishing the
+weights and click labels to Hugging Face.
 
 ## Label format
 
