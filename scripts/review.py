@@ -3,7 +3,7 @@
 
 Reads labels/auto.jsonl, writes every checked take to labels/reviewed.jsonl (same fields, plus reviewed_at;
 the last line per id wins), so it can be stopped and resumed. Audio is served from data/wake-words/data.
-Page keys: Space play, Enter accept and next, Left/Right previous/next, Backspace remove the selected click.
+Page keys: Space play / stop (a white line follows playback), S half / normal speed, Enter accept and next, Left/Right previous/next, Backspace remove the selected click.
 Click on the waveform: on a marked click selects it (and plays from 100 ms before), elsewhere adds a 20 ms
 click there. Drag a click's edges to adjust it.
 """
@@ -34,12 +34,12 @@ PAGE = r"""<!doctype html><meta charset=utf-8><title>Keyclick review</title>
 <canvas id=c width=1800 height=260></canvas>
 <div id=bar><button onclick=go(-1)>&larr; prev</button><button onclick=play(0)>&#9654; play (space)</button>
 <button onclick=accept()>accept &amp; next (enter)</button><button onclick=nextTodo()>next unreviewed</button>
-<span>click empty space: add click &middot; click a click: select + play &middot; backspace: delete &middot; drag edges to adjust</span></div>
-<p id=help style="color:#888">Red: clicks. Blue band: detected speech. Yellow ticks: logged key events.</p>
+<b id=rate>normal speed</b><span>S: half / normal speed &middot; click empty space: add click &middot; click a click: select + play &middot; backspace: delete &middot; drag edges to adjust</span></div>
+<p id=help style="color:#888">Red: clicks. Blue band: detected speech. Yellow ticks: logged key events. White line: playback position.</p>
 <script>
-let T=[],i=0,buf=null,ac=new AudioContext(),sel=-1,drag=null;const c=document.getElementById('c'),g=c.getContext('2d');
+let T=[],i=0,buf=null,ac=new AudioContext(),sel=-1,drag=null,src=null,t0=0,off=0,head=null,rate=1;const c=document.getElementById('c'),g=c.getContext('2d');
 fetch('/takes').then(r=>r.json()).then(d=>{T=d;i=Math.max(0,T.findIndex(t=>!t.reviewed_at));load()});
-async function load(){sel=-1;const t=T[i];document.getElementById('pos').textContent=`${i+1} / ${T.length}`;
+async function load(){stop();head=null;sel=-1;const t=T[i];document.getElementById('pos').textContent=`${i+1} / ${T.length}`;
  document.getElementById('meta').textContent=`${t.id} · ${t.duration_s}s · ${t.flags.join(' ')}`;
  document.getElementById('state').innerHTML=t.reviewed_at?'<span class=ok>reviewed</span>':'<span class=flag>not reviewed</span>';
  buf=await ac.decodeAudioData(await (await fetch('/audio/'+t.file)).arrayBuffer());draw()}
@@ -50,8 +50,12 @@ function draw(){const t=T[i],d=buf.getChannelData(0),W=c.width,H=c.height,step=d
  let m=0;for(const v of d)m=Math.max(m,Math.abs(v));g.strokeStyle='#ccc';g.beginPath();
  for(let x=0;x<W;x++){let lo=0,hi=0;for(let k=Math.floor(x*step);k<(x+1)*step;k++){lo=Math.min(lo,d[k]);hi=Math.max(hi,d[k])}
   g.moveTo(x,H/2-hi/m*H/2);g.lineTo(x,H/2-lo/m*H/2)}g.stroke();
- g.fillStyle='#fd3';t.key_events_s.forEach(e=>g.fillRect(X(e)-1,0,3,14))}
-function play(from){ac.resume();const s=ac.createBufferSource();s.buffer=buf;s.connect(ac.destination);s.start(0,Math.max(0,from))}
+ g.fillStyle='#fd3';t.key_events_s.forEach(e=>g.fillRect(X(e)-1,0,3,14));
+ if(head!==null){g.fillStyle='#fff';g.fillRect(X(head)-1,0,2,H)}}
+function play(from){stop();ac.resume();from=Math.max(0,from);src=ac.createBufferSource();src.buffer=buf;src.playbackRate.value=rate;
+ src.connect(ac.destination);src.start(0,from);t0=ac.currentTime;off=from;const me=src;src.onended=()=>{if(src===me)src=null};tick()}
+function stop(){if(src){const s=src;src=null;s.stop()}}
+function tick(){if(!src)return;head=Math.min(T[i].duration_s,off+(ac.currentTime-t0)*rate);draw();requestAnimationFrame(tick)}
 function hit(x){return T[i].clicks.findIndex(k=>x>=X(k[0])-4&&x<=X(k[1])+4)}
 c.onmousedown=e=>{const x=e.offsetX*c.width/c.clientWidth,j=hit(x);
  if(j<0){const s=S(x);T[i].clicks.push([+s.toFixed(3),+(s+.02).toFixed(3)]);T[i].clicks.sort((a,b)=>a[0]-b[0]);sel=hit(x);draw();return}
@@ -62,7 +66,7 @@ function save(){T[i].reviewed_at=new Date().toISOString();return fetch('/save',{
 async function accept(){await save();go(1)}
 function go(n){i=Math.min(T.length-1,Math.max(0,i+n));load()}
 function nextTodo(){const j=T.findIndex((t,k)=>k>i&&!t.reviewed_at);if(j>=0){i=j;load()}}
-document.onkeydown=e=>{if(e.key==' '){e.preventDefault();play(0)}else if(e.key=='Enter')accept();else if(e.key=='ArrowLeft')go(-1);
+document.onkeydown=e=>{if(e.key==' '){e.preventDefault();src?stop():play(0)}else if(e.key=='s'){rate=rate==1?.5:1;document.getElementById('rate').textContent=rate==1?'normal speed':'half speed'}else if(e.key=='Enter')accept();else if(e.key=='ArrowLeft')go(-1);
  else if(e.key=='ArrowRight')go(1);else if(e.key=='Backspace'&&sel>=0){T[i].clicks.splice(sel,1);sel=-1;draw()}};
 </script>"""
 
