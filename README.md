@@ -60,7 +60,7 @@ uv run scripts/review.py
 
 Review page (controls listed at the top of `scripts/review.py`): green boxes are your clicks, dashed cyan
 boxes are model detections you haven't marked. Drag to add a click, `+` on a cyan box to adopt it, `×` or
-right-click to remove, Z to undo; clicking any box plays just that stretch. Edits save on Enter or when you leave
+right-click to remove a click or dismiss a cyan box as not a click, Z to undo; clicking any box plays just that stretch. Edits save on Enter or when you leave
 the take. The queue selector can show already-reviewed takes to re-check them.
 
 Review page listening aids: playback normalised to the take's peak with +12 / +24 dB boosts behind a limiter,
@@ -88,3 +88,4 @@ weights and click labels to Hugging Face.
 | `clicks` | `[[onset_s, offset_s], ...]` |
 | `flags` | `no_events`, `event_unmatched` (no click within 250 ms of the logged start) |
 | `reviewed_at` | reviewed.jsonl only; last line per id wins |
+| `rejected` | reviewed.jsonl only, optional (from 2026-10-29): model detections Daniel dismissed as not clicks, `[[onset_s, offset_s], ...]`; candidate hard negatives |
